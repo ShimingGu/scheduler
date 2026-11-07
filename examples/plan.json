@@ -1,0 +1,16 @@
+{
+  "cwd": ".",
+  "api": {
+    "base_url": "https://api.deepseek.com/v1",
+    "model": "deepseek-flash",
+    "key_env": "SCHEDULER_API_KEY",
+    "timeout": 120,
+    "max_tokens": 4096
+  },
+  "step_timeout": 3600,
+  "revision_prompt": "保持原计划，除非最新结果 output.recommended_samples 大于下一项 task.samples；此时只将下一项 samples 增至建议值，保留其他字段和命令。不要修改更后面的任务。若无需修正，updates 必须为空。",
+  "steps": [
+    {"id": "pilot", "command": ["python3", "worker.py"], "task": {"samples": 10, "pilot": true}},
+    {"id": "main", "command": ["python3", "worker.py"], "task": {"samples": 20}}
+  ]
+}
