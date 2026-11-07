@@ -84,12 +84,15 @@ class ConfigurationTests(unittest.TestCase):
             with urllib.request.urlopen(base + "/") as response:
                 page = response.read().decode()
                 self.assertIn(app.token, page)
+                self.assertNotIn("__TRANSLATIONS__", page)
+                self.assertIn("Français", page)
                 for mode in AUTONOMY:
                     self.assertIn(mode, page)
             request = urllib.request.Request(base + "/api/default", data=b"{}", method="POST")
             with self.assertRaises(urllib.error.HTTPError) as error:
                 urllib.request.urlopen(request)
             self.assertEqual(error.exception.code, 403)
+            self.assertEqual(json.load(error.exception)["error_code"], "session_invalid")
             error.exception.close()
             request.add_header("X-Scheduler-Token", app.token)
             with urllib.request.urlopen(request) as response:

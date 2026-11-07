@@ -6,12 +6,36 @@ import json
 import os
 from pathlib import Path
 import secrets
+import re
 import sys
 
 from .core import ChatAPI, Scheduler, SchedulerError, read_json, write_json
 from .credentials import parse_credentials
 from .launcher import launch
 from .catalog import model_catalog
+
+
+def error_details(message):
+    """Stable UI codes; protocol diagnostics stay available in the original form."""
+    codes = {
+        "cannot parse credential file": "credentials_invalid",
+        "import API key file first": "profile_required",
+        "plan cwd must be an absolute path": "cwd_required",
+        "invalid local session": "session_invalid",
+        "request size must be within 1 MB": "request_size",
+        "unknown run": "unknown_run",
+        "API endpoint must use HTTPS (or loopback HTTP)": "endpoint_error",
+        "Could not read model catalog; you can enter a model manually": "models_error",
+        "API request failed or response is not valid JSON": "api_error",
+        "api.model and api.base_url are required": "model_required",
+        "harness must leave a revision_prompt": "prompt_required",
+    }
+    match = re.fullmatch(r"(?:API|Model listing) HTTP (\d+)", message)
+    if match:
+        return {"error_code": "api_http", "error_params": {"code": match.group(1)}}
+    if message.startswith(("step ", "steps ", "command ", "task ")):
+        return {"error_code": "steps_invalid"}
+    return {"error_code": codes.get(message, "operation_error")}
 
 
 def demo_plan():
@@ -34,7 +58,7 @@ class Application:
             try:
                 credentials = parse_credentials(body["text"])
             except Exception:
-                raise SchedulerError("无法解析 key 文件；支持 .env、JSON 或纯 key 文本") from None
+                raise SchedulerError("cannot parse credential file") from None
             pid = secrets.token_hex(8)
             self.profiles[pid] = credentials
             return {"id": pid, "name": Path(body.get("name", "key file")).name,
@@ -49,10 +73,11 @@ class Application:
             path = Path(info["run_dir"]) / "state.json"
             state = read_json(path) if path.exists() else {"phase": "starting", "completed": [], "pending": []}
             return {"phase": state["phase"], "error": state.get("error"),
-                    "completed": state["completed"], "pending": [s["id"] for s in state["pending"]], **info}
+                    "completed": state["completed"], "pending": [s["id"] for s in state["pending"]], **info,
+                    **(error_details(state["error"]) if state.get("error") else {})}
         profile = self.profiles.get(body.get("profile"))
         if profile is None:
-            raise SchedulerError("请先导入 API key 文件")
+            raise SchedulerError("import API key file first")
         config = {"base_url": body["base_url"].strip(), "model": body["model"].strip(),
                   "reasoning_effort": body.get("reasoning_effort", "default"),
                   "key_env": "SCHEDULER_UI_API_KEY", "timeout": 120, "max_tokens": 4096}
@@ -63,7 +88,7 @@ class Application:
             plan["api"] = config
             plan["autonomy"] = body["autonomy"]
             if not Path(plan.get("cwd", ".")).is_absolute():
-                raise SchedulerError("请在计划 cwd 中填写绝对工作目录")
+                raise SchedulerError("plan cwd must be an absolute path")
             rid = datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(4)
             root = self.root / rid
             Scheduler(plan, root)
@@ -100,11 +125,13 @@ def make_server(port, app):
                 self.reply(404, {"error": "not found"})
                 return
             html = (Path(__file__).parent / "ui.html").read_text(encoding="utf-8")
-            self.reply(200, html.replace("__SESSION_TOKEN__", app.token), "text/html")
+            translations = json.dumps(read_json(Path(__file__).parent / "locales.json"), ensure_ascii=False).replace("<", "\\u003c")
+            html = html.replace("__SESSION_TOKEN__", app.token).replace("__TRANSLATIONS__", translations)
+            self.reply(200, html, "text/html")
 
         def do_POST(self):
             if not self.local_host() or not secrets.compare_digest(self.headers.get("X-Scheduler-Token", ""), app.token):
-                self.reply(403, {"error": "invalid local session"})
+                self.reply(403, {"error": "invalid local session", **error_details("invalid local session")})
                 return
             try:
                 size = int(self.headers.get("Content-Length", 0))
@@ -113,8 +140,8 @@ def make_server(port, app):
                 body = json.loads(self.rfile.read(size))
                 self.reply(200, app.dispatch(self.path, body))
             except Exception as exc:
-                message = str(exc) if isinstance(exc, SchedulerError) else "操作失败，请检查配置和文件格式"
-                self.reply(400, {"error": message})
+                message = str(exc) if isinstance(exc, SchedulerError) else "operation failed"
+                self.reply(400, {"error": message, **error_details(message)})
 
     return ThreadingHTTPServer(("127.0.0.1", port), Handler)
 

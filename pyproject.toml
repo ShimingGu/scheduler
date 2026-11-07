@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "serial-revision-scheduler"
-version = "0.3.0"
+version = "0.4.0"
 description = "Unattended serial execution with API-driven revision of future steps"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -18,4 +18,4 @@ packages = ["scheduler"]
 package-dir = {scheduler = "."}
 
 [tool.setuptools.package-data]
-scheduler = ["ui.html", "examples/worker.py", "examples/plan.json", "examples/scheduler.ini", "examples/slurm.sh"]
+scheduler = ["ui.html", "locales.json", "examples/worker.py", "examples/plan.json", "examples/scheduler.ini", "examples/slurm.sh"]
